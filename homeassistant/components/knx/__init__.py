@@ -75,7 +75,6 @@ from .const import (
 )
 from .device import KNXInterfaceDevice
 from .expose import KNXExposeSensor, KNXExposeTime, create_knx_exposure
-from .helpers.entity_store import KNXEntityStore
 from .project import STORAGE_KEY as PROJECT_STORAGE_KEY, KNXProject
 from .schema import (
     BinarySensorSchema,
@@ -100,6 +99,7 @@ from .schema import (
     ga_validator,
     sensor_type_validator,
 )
+from .storage.config_store import KNXConfigStore
 from .telegrams import STORAGE_KEY as TELEGRAMS_STORAGE_KEY, Telegrams
 from .websocket import register_panel
 
@@ -404,7 +404,7 @@ async def async_remove_config_entry_device(
         entity_registry, device_entry.id, include_disabled_entities=True
     )
     for entity in enitites:
-        await knx_module.entity_store.delete_entity(entity.entity_id)
+        await knx_module.config_store.delete_entity(entity.entity_id)
     return True
 
 
@@ -423,7 +423,7 @@ class KNXModule:
         self.entry = entry
 
         self.project = KNXProject(hass=hass, entry=entry)
-        self.entity_store = KNXEntityStore(hass=hass, entry=entry)
+        self.config_store = KNXConfigStore(hass=hass, entry=entry)
 
         self.xknx = XKNX(
             connection_config=self.connection_config(),
@@ -457,7 +457,7 @@ class KNXModule:
     async def start(self) -> None:
         """Start XKNX object. Connect to tunneling or Routing device."""
         await self.project.load_project()
-        await self.entity_store.load_data()
+        await self.config_store.load_data()
         await self.telegrams.load_history()
         await self.xknx.start()
 
