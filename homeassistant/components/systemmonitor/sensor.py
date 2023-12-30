@@ -76,10 +76,19 @@ SIGNAL_SYSTEMMONITOR_UPDATE = "systemmonitor_update"
 
 
 @dataclass(frozen=True)
-class SysMonitorSensorEntityDescription(SensorEntityDescription):
-    """Description for System Monitor sensor entities."""
+class SysMonitorSensorEntityDescriptionMixin:
+    """Mixin for System Monitor sensor entities."""
 
     coordinator: type[MonitorCoordinator]
+
+
+@dataclass(frozen=True)
+class SysMonitorSensorEntityDescription(
+    SysMonitorSensorEntityDescriptionMixin,
+    SensorEntityDescription,
+):
+    """Describes System Monitor sensor entities."""
+
     mandatory_arg: bool = False
     value_disk: Callable[[sdiskusage], float] | None = None
     value_swap: Callable[[sswap], float] | None = None
@@ -535,6 +544,11 @@ class SystemMonitorSensor(CoordinatorEntity[MonitorCoordinator], SensorEntity):
             manufacturer="System Monitor",
             name="System Monitor",
         )
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added."""
+        await super().async_added_to_hass()
+        await self.coordinator.async_request_refresh()
 
     @property
     def native_value(self) -> str | float | int | datetime | None:
