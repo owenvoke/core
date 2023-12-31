@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import socket
-from unittest.mock import AsyncMock, Mock, create_autospec, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from psutil import Process
 from psutil._common import sdiskpart, sdiskusage, shwtemp, snetio, snicaddr, sswap
 from psutil._pslinux import svmem
 import pytest
@@ -14,6 +13,14 @@ from homeassistant.components.systemmonitor.const import DOMAIN
 from homeassistant.core import HomeAssistant
 
 from tests.common import MockConfigEntry
+
+
+class Process:
+    """Mock a Process class."""
+
+    def name():
+        """Return a name."""
+        return "Python3"
 
 
 @pytest.fixture
@@ -68,9 +75,6 @@ async def mock_added_config_entry(
 @pytest.fixture
 def mock_psutil() -> Mock:
     """Mock psutil."""
-    mock_process: Mock = create_autospec(Process)
-    mock_process.configure_mock(pid=1, name="Python3")
-
     with patch(
         "homeassistant.components.systemmonitor.coordinator.psutil",
         autospec=True,
@@ -110,7 +114,8 @@ def mock_psutil() -> Mock:
         }
         mock_psutil.cpu_percent.return_value = 10.0
         mock_psutil.boot_time.return_value = 1703973338.0
-        mock_psutil.process_iter.return_value = [mock_process.return_value]
+        _process = Process
+        mock_psutil.process_iter.return_value = [_process]
         mock_psutil.sensors_temperatures.return_value = {
             "cpu0-thermal": [shwtemp("cpu0-thermal", 50.0, 60.0, 70.0)]
         }
@@ -120,12 +125,8 @@ def mock_psutil() -> Mock:
 @pytest.fixture
 def mock_util() -> Mock:
     """Mock psutil."""
-    mock_process: Mock = create_autospec(Process)
-    mock_process.configure_mock(pid=1, name="Python3")
-
     with patch(
-        "homeassistant.components.systemmonitor.util.psutil",
-        autospec=True,
+        "homeassistant.components.systemmonitor.util.psutil", autospec=True
     ) as mock_util:
         mock_util.net_if_addrs.return_value = {
             "eth0": [
@@ -138,7 +139,8 @@ def mock_util() -> Mock:
                 )
             ]
         }
-        mock_util.process_iter.return_value = [mock_process.return_value]
+        _process = Process()
+        mock_util.process_iter.return_value = [_process]
         mock_util.sensors_temperatures.return_value = {
             "cpu0-thermal": [shwtemp("cpu0-thermal", 50.0, 60.0, 70.0)]
         }
@@ -156,6 +158,5 @@ def mock_os() -> Mock:
         "homeassistant.components.systemmonitor.coordinator.os",
         autospec=True,
     ) as mock_os:
-        _os = mock_os
-        _os.getloadavg.return_value = (1, 2, 3)
-        yield _os
+        mock_os.getloadavg.return_value = (1, 2, 3)
+        yield mock_os
