@@ -48,6 +48,7 @@ def mock_config_entry() -> MockConfigEntry:
             },
             "resources": [
                 "disk_use_percent_/",
+                "disk_use_percent_/home/notexist/",
                 "memory_free_",
                 "network_out_eth0",
                 "process_python3",
