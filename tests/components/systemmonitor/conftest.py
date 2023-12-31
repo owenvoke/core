@@ -20,7 +20,7 @@ class Process:
 
     def name():
         """Return a name."""
-        return "Python3"
+        return "python3"
 
 
 @pytest.fixture
