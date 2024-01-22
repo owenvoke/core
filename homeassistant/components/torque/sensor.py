@@ -1,21 +1,37 @@
 """Support for the Torque OBD application."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
+from typing import Any
 
+from aiohttp.hdrs import METH_GET
 from aiohttp.web import Request, Response
 import voluptuous as vol
+from yarl import URL
 
 from homeassistant.components import cloud
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
+from homeassistant.components.webhook import (
+    async_generate_id as webhook_async_generate_id,
+    async_generate_url as webhook_async_generate_url,
+    async_register as webhook_async_register,
+    async_unregister as webhook_async_unregister,
+)
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.const import CONF_EMAIL, CONF_WEBHOOK_ID, DEGREE
+from homeassistant.const import (
+    CONF_EMAIL,
+    CONF_WEBHOOK_ID,
+    DEGREE,
+    EVENT_HOMEASSISTANT_STOP,
+)
 from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
@@ -23,6 +39,7 @@ from .const import (
     API_PATH,
     DOMAIN,
     ISSUE_PLACEHOLDER,
+    LOGGER,
     SENSOR_EMAIL_FIELD,
     SENSOR_NAME_KEY,
     SENSOR_UNIT_KEY,
@@ -52,13 +69,100 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor from a config entry created in the integrations UI."""
+    use_legacy = True
     unique_id = config_entry.unique_id
     email = config_entry.data.get(CONF_EMAIL)
     sensors: dict[int, TorqueSensor] = {}
 
-    hass.http.register_view(
-        TorqueReceiveDataView(email, sensors, async_add_entities, unique_id)
-    )
+    if use_legacy:
+        hass.http.register_view(
+            TorqueReceiveDataView(email, sensors, async_add_entities, unique_id)
+        )
+    else:
+        if CONF_WEBHOOK_ID not in config_entry.data or config_entry.unique_id is None:
+            new_data = config_entry.data.copy()
+            unique_id = str(config_entry.data[CONF_EMAIL])
+            if CONF_WEBHOOK_ID not in new_data:
+                new_data[CONF_WEBHOOK_ID] = webhook_async_generate_id()
+
+            hass.config_entries.async_update_entry(
+                config_entry, data=new_data, unique_id=unique_id
+            )
+
+        register_lock = asyncio.Lock()
+        webhooks_registered = False
+
+        async def unregister_webhook(
+            _: Any,
+        ) -> None:
+            nonlocal webhooks_registered
+            async with register_lock:
+                LOGGER.debug(
+                    "Unregister Torque webhook (%s)", config_entry.data[CONF_WEBHOOK_ID]
+                )
+                webhook_async_unregister(hass, config_entry.data[CONF_WEBHOOK_ID])
+                webhooks_registered = False
+
+        async def register_webhook(
+            _: Any,
+        ) -> None:
+            nonlocal webhooks_registered
+            async with register_lock:
+                if webhooks_registered:
+                    return
+
+            webhook_url = (
+                await _async_cloudhook_generate_url(hass, config_entry)
+                if cloud.async_actvie_subscription(hass)
+                else await webhook_async_generate_url(
+                    hass, config_entry.data[CONF_WEBHOOK_ID]
+                )
+            )
+
+            url = URL(webhook_url)
+            if url.scheme != "https" or url.port != 443:
+                LOGGER.warning(
+                    "Webhook not registered - "
+                    "https and port 443 is required to register the webhook"
+                )
+                return
+            webhook_name = f"Torque {config_entry.data['name']}"
+
+            webhook_async_register(
+                hass,
+                DOMAIN,
+                webhook_name,
+                config_entry.data[CONF_WEBHOOK_ID],
+                _webhook_get_handler(email, sensors, async_add_entities, unique_id),
+                allowed_methods=[METH_GET],
+            )
+            LOGGER.debug("Registered Torque webhook at hass: %s", webhook_url)
+            config_entry.async_on_unload(
+                hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, unregister_webhook)
+            )
+            webhooks_registered = True
+
+        async def manage_cloudhook(state: cloud.CloudConnectionState) -> None:
+            LOGGER.debug("Cloudconnection state changed to %s", state)
+            if state is cloud.CloudConnectionState.CLOUD_CONNECTED:
+                await register_webhook(None)
+
+            if state is cloud.CloudConnectionState.CLOUD_DISCONNECTED:
+                await unregister_webhook(None)
+                config_entry.async_on_unload(
+                    async_call_later(hass, 30, register_webhook)
+                )
+
+        if cloud.async_active_subscription(hass):
+            if cloud.async_is_connected(hass):
+                config_entry.async_on_onload(
+                    async_call_later(hass, 1, register_webhook)
+                )
+            config_entry.async_on_unload(
+                cloud.async_listen_connection_change(hass, manage_cloudhook)
+            )
+        else:
+            config_entry.async_on_unload(async_call_later(hass, 1, register_webhook))
 
 
 async def async_setup_platform(
