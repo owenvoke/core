@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from aiohttp.web import Request, Response
 import voluptuous as vol
 
 from homeassistant.components.http import HomeAssistantView
@@ -108,7 +109,7 @@ class TorqueReceiveDataView(HomeAssistantView):
     url = API_PATH
     name = "api:torque"
 
-    def __init__(self, email, sensors, add_entities, unique_id):
+    def __init__(self, email, sensors, add_entities, unique_id) -> None:
         """Initialize a Torque view."""
         self.email = email
         self.sensors = sensors
@@ -119,40 +120,9 @@ class TorqueReceiveDataView(HomeAssistantView):
     def get(self, request):
         """Handle Torque data request."""
         hass = request.app["hass"]
-        data = request.query
-
-        if self.email is not None and self.email != data[SENSOR_EMAIL_FIELD]:
-            return
-
-        names = {}
-        units = {}
-        for key in data:
-            is_name = NAME_KEY.match(key)
-            is_unit = UNIT_KEY.match(key)
-            is_value = VALUE_KEY.match(key)
-
-            if is_name:
-                pid = convert_pid(is_name.group(1))
-                names[pid] = data[key]
-            elif is_unit:
-                pid = convert_pid(is_unit.group(1))
-
-                temp_unit = data[key]
-                if "\\xC2\\xB0" in temp_unit:
-                    temp_unit = temp_unit.replace("\\xC2\\xB0", DEGREE)
-
-                units[pid] = temp_unit
-            elif is_value:
-                pid = convert_pid(is_value.group(1))
-                if pid in self.sensors:
-                    self.sensors[pid].async_on_update(data[key])
-
-        for pid, name in names.items():
-            if pid not in self.sensors:
-                self.sensors[pid] = TorqueSensor(name, units.get(pid), self.unique_id)
-                hass.async_add_job(self.add_entities, [self.sensors[pid]])
-
-        return "OK!"
+        _addEntitiesFromRequest(
+            hass, request, self.email, self.sensors, self.add_entities, self.unique_id
+        )
 
 
 class TorqueSensor(SensorEntity):
@@ -190,3 +160,49 @@ class TorqueSensor(SensorEntity):
         """Receive an update."""
         self._state = value
         self.async_write_ha_state()
+
+
+async def _addEntitiesFromRequest(
+    hass: HomeAssistant,
+    request: Request,
+    email: str,
+    sensors: dict[int, TorqueSensor],
+    add_entities: AddEntitiesCallback,
+    unique_id: str,
+) -> Response:
+    if not request.query:
+        return "No Torque Query Parameters"
+    data = request.query
+
+    if email is not None and email != data[SENSOR_EMAIL_FIELD]:
+        return
+
+    names = {}
+    units = {}
+    for key in data:
+        is_name = NAME_KEY.match(key)
+        is_unit = UNIT_KEY.match(key)
+        is_value = VALUE_KEY.match(key)
+
+        if is_name:
+            pid = convert_pid(is_name.group(1))
+            names[pid] = data[key]
+        elif is_unit:
+            pid = convert_pid(is_unit.group(1))
+
+            temp_unit = data[key]
+            if "\\xC2\\xB0" in temp_unit:
+                temp_unit = temp_unit.replace("\\xC2\\xB0", DEGREE)
+
+            units[pid] = temp_unit
+        elif is_value:
+            pid = convert_pid(is_value.group(1))
+            if pid in sensors:
+                sensors[pid].async_on_update(data[key])
+
+    for pid, name in names.items():
+        if pid not in sensors:
+            sensors[pid] = TorqueSensor(name, units.get(pid), unique_id)
+            hass.async_add_job(add_entities, [sensors[pid]])
+
+    return "OK!"
