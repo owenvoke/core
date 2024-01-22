@@ -1,15 +1,17 @@
 """Support for the Torque OBD application."""
 from __future__ import annotations
 
+import contextlib
 import re
 
 from aiohttp.web import Request, Response
 import voluptuous as vol
 
+from homeassistant.components import cloud
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.const import CONF_EMAIL, DEGREE
+from homeassistant.const import CONF_EMAIL, CONF_WEBHOOK_ID, DEGREE
 from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType
 import homeassistant.helpers.config_validation as cv
@@ -30,6 +32,7 @@ from .const import (
 NAME_KEY = re.compile(SENSOR_NAME_KEY)
 UNIT_KEY = re.compile(SENSOR_UNIT_KEY)
 VALUE_KEY = re.compile(SENSOR_VALUE_KEY)
+CONF_CLOUDHOOK_URL = "cloudhook_url"
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -120,7 +123,7 @@ class TorqueReceiveDataView(HomeAssistantView):
     def get(self, request):
         """Handle Torque data request."""
         hass = request.app["hass"]
-        return _addEntitiesFromRequest(
+        _addEntitiesFromRequest(
             hass, request, self.email, self.sensors, self.add_entities, self.unique_id
         )
 
@@ -206,3 +209,36 @@ async def _addEntitiesFromRequest(
             hass.async_add_job(add_entities, [sensors[pid]])
 
     return "OK!"
+
+
+async def _async_cloudhook_generate_url(hass: HomeAssistant, entry: ConfigEntry) -> str:
+    """Generate the full URL for a webhook_id."""
+    if CONF_CLOUDHOOK_URL not in entry.data:
+        webhook_id = entry.data[CONF_WEBHOOK_ID]
+        # Some users already have their webhook as cloudhook.
+        # We remove them to be sure we can create a new one.
+        with contextlib.suppress(ValueError):
+            await cloud.async_delete_cloudhook(hass, webhook_id)
+        webhook_url = await cloud.async_create_cloudhook(hass, webhook_id)
+        data = {**entry.data, CONF_CLOUDHOOK_URL: webhook_url}
+        hass.config_entries.async_update_entry(entry, data=data)
+        return webhook_url
+    return str(entry.data[CONF_CLOUDHOOK_URL])
+
+
+async def _webhook_get_handler(
+    email: str,
+    sensors: dict[int, TorqueSensor],
+    add_entities: AddEntitiesCallback,
+    unique_id: str,
+):
+    """Return webhook handler."""
+
+    async def async_webhook_handler(
+        hass: HomeAssistant, webhook_id: str, request: Request
+    ) -> Response | None:
+        return _addEntitiesFromRequest(
+            hass, webhook_id, email, sensors, add_entities, unique_id
+        )
+
+    return async_webhook_handler
