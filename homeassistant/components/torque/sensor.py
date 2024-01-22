@@ -158,30 +158,30 @@ class TorqueReceiveDataView(HomeAssistantView):
 class TorqueSensor(SensorEntity):
     """Representation of a Torque sensor."""
 
-    def __init__(self, name, unit, unique_id):
+    def __init__(self, name: str, unit: str, unique_id: str) -> None:
         """Initialize the sensor."""
         self._name = name
         self._unit = unit
-        self._state = None
         self._attr_unique_id = f"{unique_id}_{name}"
+        self._state = None
 
     @property
-    def name(self):
+    def name(self) -> str:
         """Return the name of the sensor."""
         return self._name
 
     @property
-    def native_unit_of_measurement(self):
+    def native_unit_of_measurement(self) -> str:
         """Return the unit of measurement."""
         return self._unit
 
     @property
-    def native_value(self):
+    def native_value(self) -> str:
         """Return the state of the sensor."""
         return self._state
 
     @property
-    def icon(self):
+    def icon(self) -> str:
         """Return the default icon of the sensor."""
         return "mdi:car"
 
