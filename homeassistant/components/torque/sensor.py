@@ -120,7 +120,7 @@ class TorqueReceiveDataView(HomeAssistantView):
     def get(self, request):
         """Handle Torque data request."""
         hass = request.app["hass"]
-        _addEntitiesFromRequest(
+        return _addEntitiesFromRequest(
             hass, request, self.email, self.sensors, self.add_entities, self.unique_id
         )
 
