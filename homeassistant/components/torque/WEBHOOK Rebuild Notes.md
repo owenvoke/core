@@ -22,16 +22,20 @@ If torque does upload a vehicle profile name parameter, we may want to modify th
 To register a webhook with `homeassistant.components.webhook.async_register` we'll need the following parameters:
 
 - hass (pretty easy to access)
-- DOMAIN (sensor)
+- DOMAIN ('torque')
 - webhook_id (torque? formatted string with torque email/id, we can also generate unique ids)
 - handler (Maybe we can leverage existing get callback)
 - * (no idea what this is)
 - local_only (I'd believe true, must investigate)
 - methods (get)
 
+Since handling multiple domains should have a coordinator implementation, this will actually be implemented on the [sensor.py](./sensor.py) file.
+This will remove our need for the next step, which was to pipe the platform data
+
 ## Step 2, callback
 
 I plan to move the existing sensor callback into it's own function
+This will require a DataUpdateCoordinator class... Which is something that should be implemented on the base branch. Let's combine this step with [Step 1](#step-1-registering-a-webhook)
 
 ## Step 3, pulling data into platforms
 
